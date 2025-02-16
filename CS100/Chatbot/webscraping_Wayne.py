@@ -1,62 +1,57 @@
-import requests
+from selenium import webdriver
+from selenium.webdriver.chrome.service import Service
+from selenium.webdriver.common.by import By
+from webdriver_manager.chrome import ChromeDriverManager
 from bs4 import BeautifulSoup
 import json
 import time
 
-# Base URL of YueduFeng
-base_url = "https://www.gushi365.com/"
+# Initialize Selenium WebDriver
+options = webdriver.ChromeOptions()
+options.add_argument("--headless")  # Run in headless mode (no UI)
+options.add_argument("--disable-gpu")
+options.add_argument("--no-sandbox")
 
-# Headers to mimic a real browser request
-headers = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
-}
+service = Service(ChromeDriverManager().install())
+driver = webdriver.Chrome(service=service, options=options)
 
-# Function to scrape story links from the homepage
-def get_story_links():
-    response = requests.get(base_url, headers=headers)
-    soup = BeautifulSoup(response.content, "html.parser")
-    story_links = []
-
-    # Find all story links on the homepage
-    for link in soup.find_all("a", href=True):
-        href = link["href"]
-        if href.startswith("/"):
-            story_links.append(base_url + href)
-
-    return story_links
-
-# Function to scrape individual story content
+# Function to scrape a single story
 def scrape_story(url):
-    response = requests.get(url, headers=headers)
-    soup = BeautifulSoup(response.content, "html.parser")
+    driver.get(url)
+    time.sleep(3)  # Allow JavaScript to load
+
+    soup = BeautifulSoup(driver.page_source, "html.parser")
 
     # Extract story title
-    title = soup.find("h1")
-    title_text = title.text.strip() if title else "No Title"
+    title = soup.select_one("h1").text.strip()
 
-    # Extract story content
-    content_div = soup.find("div", class_="post-content")
-    paragraphs = content_div.find_all("p") if content_div else []
-    content_text = "\n".join(p.text.strip() for p in paragraphs)
+    # Extract story content (Now selecting <div class="mt-4"> instead of previous incorrect selector)
+    paragraphs = soup.select("div.mt-4 p")
+    if not paragraphs:
+        paragraphs = soup.select("div[class*='content'] p")  # Alternative selector
 
-    return {"title": title_text, "content": content_text}
+    content = "\n".join([p.text.strip() for p in paragraphs])
 
-# Main function to scrape multiple stories
-def scrape_stories():
-    story_links = get_story_links()
-    stories = []
+    return {"title": title, "content": content}
 
-    for link in story_links:
-        story = scrape_story(link)
-        stories.append(story)
-        time.sleep(1)  # Respectful delay between requests
+# Load previously scraped story links
+with open("storymami_story_links.json", "r", encoding="utf-8") as file:
+    stories = json.load(file)
 
-    return stories
+# Scrape all stories
+story_data = []
+for story in stories:
+    print(f"Scraping: {story['url']}")
+    story_details = scrape_story(story["url"])
+    story_data.append(story_details)
+    time.sleep(2)  # Avoid bot detection
 
-# Scrape stories and save to JSON
-stories = scrape_stories()
-output_file = "yuedufeng_stories.json"
+# Save to JSON
+output_file = "storymami_stories.json"
 with open(output_file, "w", encoding="utf-8") as file:
-    json.dump(stories, file, ensure_ascii=False, indent=4)
+    json.dump(story_data, file, ensure_ascii=False, indent=4)
 
-print(f"Scraped {len(stories)} stories and saved to '{output_file}'")
+print(f"Scraped {len(story_data)} stories and saved to '{output_file}'")
+
+# Close WebDriver
+driver.quit()
